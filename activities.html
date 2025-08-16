@@ -54,8 +54,8 @@
               : "Unknown Date";
 
             const button = document.createElement("button");
-            button.textContent = "Download CSV";
-            button.onclick = () => downloadCSV(ride.id, button);
+            button.textContent = "Upload to Dropbox";
+            button.onclick = () => uploadToDropbox(ride.id, button);
 
             item.textContent = `${name} — ${km} km on ${date} `;
             item.appendChild(button);
@@ -69,38 +69,32 @@
         });
     }
 
-   function downloadCSV(activityId, button) {
-  const originalText = button.textContent;
-  button.disabled = true;
-  button.textContent = "Generating...";
+    function uploadToDropbox(activityId, button) {
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = "Uploading...";
 
-  const url = `https://strava-csv-backend-production.up.railway.app/activity-stream?session_id=${sessionId}&activity_id=${activityId}`;
-  
-  fetch(url)
-    .then(response => {
-      if (!response.ok) throw new Error("Failed to download CSV.");
-      return response.blob();
-    })
-    .then(blob => {
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `activity_${activityId}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
-    })
-    .catch(error => {
-      alert("Error downloading CSV: " + error.message);
-    })
-    .finally(() => {
-      button.disabled = false;
-      button.textContent = originalText;
-    });
-}
-
+      fetch(`https://strava-csv-backend-production.up.railway.app/activity-stream?session_id=${sessionId}&activity_id=${activityId}`)
+        .then(res => {
+          if (!res.ok) throw new Error(`Upload failed with status ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          if (data.dropbox_path) {
+            alert(`CSV uploaded to Dropbox:\n${data.dropbox_path}`);
+          } else {
+            alert("Upload failed: no Dropbox path returned.");
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          alert("Error uploading CSV: " + err.message);
+        })
+        .finally(() => {
+          button.disabled = false;
+          button.textContent = originalText;
+        });
+    }
   </script>
 </body>
 </html>
-
