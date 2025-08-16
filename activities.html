@@ -75,15 +75,14 @@
       button.textContent = "Uploading...";
 
       fetch(`https://strava-csv-backend-production.up.railway.app/activity-stream?session_id=${sessionId}&activity_id=${activityId}`)
-        .then(res => {
-          if (!res.ok) throw new Error(`Upload failed with status ${res.status}`);
-          return res.json();
-        })
-        .then(data => {
-          if (data.dropbox_path) {
+        .then(res => res.json().then(data => ({ ok: res.ok, data })))
+        .then(({ ok, data }) => {
+          if (ok && data.dropbox_path) {
             alert(`CSV uploaded to Dropbox:\n${data.dropbox_path}`);
+          } else if (data.detail) {
+            alert(`Upload failed: ${data.detail}`);
           } else {
-            alert("Upload failed: no Dropbox path returned.");
+            alert("Upload failed: unknown error");
           }
         })
         .catch(err => {
