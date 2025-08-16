@@ -23,10 +23,12 @@
     const loadingDiv = document.getElementById("loading");
     const list = document.getElementById("ride-list");
 
+    const BACKEND_URL = "https://optcadbackend-production.up.railway.app";
+
     if (!sessionId) {
       document.body.innerHTML = "<p>Session ID missing in URL.</p>";
     } else {
-      fetch(`https://strava-csv-backend-production.up.railway.app/activities?session_id=${sessionId}`)
+      fetch(`${BACKEND_URL}/activities?session_id=${sessionId}`)
         .then(res => {
           if (!res.ok) throw new Error(`HTTP error ${res.status}`);
           return res.json();
@@ -74,7 +76,7 @@
       button.disabled = true;
       button.textContent = "Uploading...";
 
-      fetch(`https://strava-csv-backend-production.up.railway.app/activity-stream?session_id=${sessionId}&activity_id=${activityId}`)
+      fetch(`${BACKEND_URL}/activity-stream?session_id=${sessionId}&activity_id=${activityId}`)
         .then(res => res.json().then(data => ({ ok: res.ok, data })))
         .then(({ ok, data }) => {
           if (ok && data.dropbox_path) {
