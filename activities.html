@@ -1,101 +1,65 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Your Strava Rides</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 1rem; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    ul { list-style-type: none; padding-left: 0; }
-    li { margin-bottom: 0.7rem; }
-    button { margin-left: 1rem; padding: 0.3rem 0.6rem; }
-    #loading { font-style: italic; margin-bottom: 1rem; }
-  </style>
+<meta charset="UTF-8">
+<title>Your Strava Rides</title>
+<style>
+  body { font-family: Arial; padding: 1rem; }
+  button { margin-left: 1rem; padding: 0.3rem 0.6rem; }
+  ul { list-style:none; padding:0; }
+  li { margin-bottom:0.7rem; }
+  #loading { font-style:italic; }
+</style>
 </head>
 <body>
-  <h1>Your Recent Bike Rides</h1>
-  <div id="loading">Loading activities...</div>
-  <ul id="ride-list"></ul>
+<h1>Your Recent Bike Rides</h1>
+<div id="loading">Loading activities...</div>
+<ul id="ride-list"></ul>
 
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get("session_id");
-    const loadingDiv = document.getElementById("loading");
-    const list = document.getElementById("ride-list");
+<script>
+const params = new URLSearchParams(window.location.search);
+const sessionId = params.get("session_id");
+const list = document.getElementById("ride-list");
+const loadingDiv = document.getElementById("loading");
+const BACKEND_URL = "https://optcadbackend-production.up.railway.app";
 
-    const BACKEND_URL = "https://optcadbackend-production.up.railway.app";
+if (!sessionId) document.body.innerHTML = "<p>Session ID missing in URL.</p>";
+else {
+  fetch(`${BACKEND_URL}/activities?session_id=${sessionId}`)
+    .then(res => res.json())
+    .then(data => {
+      loadingDiv.style.display = "none";
+      if (!Array.isArray(data)) return list.innerHTML="<li>No rides found</li>";
+      data.forEach(ride=>{
+        const li=document.createElement("li");
+        const name=ride.name||"Unnamed Ride";
+        const km=(ride.distance/1000).toFixed(2);
+        const date=ride.start_date?new Date(ride.start_date).toLocaleDateString():"Unknown Date";
+        const button=document.createElement("button");
+        button.textContent="Compute";
+        button.onclick=()=>computeRide(ride.id, button);
+        li.textContent=`${name} — ${km} km on ${date} `;
+        li.appendChild(button);
+        list.appendChild(li);
+      });
+    });
+}
 
-    if (!sessionId) {
-      document.body.innerHTML = "<p>Session ID missing in URL.</p>";
-    } else {
-      fetch(`${BACKEND_URL}/activities?session_id=${sessionId}`)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-          return res.json();
-        })
-        .then(data => {
-          loadingDiv.style.display = "none";
-
-          if (!Array.isArray(data)) {
-            list.innerHTML = `<li>Unexpected response format.</li>`;
-            return;
-          }
-
-          if (data.length === 0) {
-            list.innerHTML = "<li>No rides found.</li>";
-            return;
-          }
-
-          data.forEach(ride => {
-            const item = document.createElement("li");
-
-            const name = ride.name || "Unnamed Ride";
-            const km = ride.distance ? (ride.distance / 1000).toFixed(2) : "N/A";
-            const date = ride.start_date
-              ? new Date(ride.start_date).toLocaleDateString()
-              : "Unknown Date";
-
-            const button = document.createElement("button");
-            button.textContent = "Upload to Dropbox";
-            button.onclick = () => uploadToDropbox(ride.id, button);
-
-            item.textContent = `${name} — ${km} km on ${date} `;
-            item.appendChild(button);
-            list.appendChild(item);
-          });
-        })
-        .catch(err => {
-          loadingDiv.style.display = "none";
-          console.error("Fetch error:", err);
-          document.body.innerHTML = `<p>Failed to load activities. ${err.message}</p>`;
-        });
-    }
-
-    function uploadToDropbox(activityId, button) {
-      const originalText = button.textContent;
-      button.disabled = true;
-      button.textContent = "Uploading...";
-
-      fetch(`${BACKEND_URL}/activity-stream?session_id=${sessionId}&activity_id=${activityId}`)
-        .then(res => res.json().then(data => ({ ok: res.ok, data })))
-        .then(({ ok, data }) => {
-          if (ok && data.dropbox_path) {
-            alert(`CSV uploaded to Dropbox:\n${data.dropbox_path}`);
-          } else if (data.detail) {
-            alert(`Upload failed: ${data.detail}`);
-          } else {
-            alert("Upload failed: unknown error");
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          alert("Error uploading CSV: " + err.message);
-        })
-        .finally(() => {
-          button.disabled = false;
-          button.textContent = originalText;
-        });
-    }
-  </script>
+function computeRide(activityId, button){
+  button.disabled=true;
+  button.textContent="Processing...";
+  fetch(`${BACKEND_URL}/compute?session_id=${sessionId}&activity_id=${activityId}`)
+    .then(res=>res.json())
+    .then(data=>{
+      console.log("Computed ride:", data);
+      alert(`Optimal cadence: ${data.optimal_cadence.toFixed(1)}\nSegments: ${data.segments.length}`);
+    })
+    .finally(()=>{
+      button.disabled=false;
+      button.textContent="Compute";
+    });
+}
+</script>
 </body>
 </html>
+
