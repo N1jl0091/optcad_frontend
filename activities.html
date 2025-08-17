@@ -1,65 +1,246 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Your Strava Rides</title>
+<meta charset="utf-8" />
+<title>Your Strava Rides — OptCad</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-  body { font-family: Arial; padding: 1rem; }
-  button { margin-left: 1rem; padding: 0.3rem 0.6rem; }
-  ul { list-style:none; padding:0; }
-  li { margin-bottom:0.7rem; }
-  #loading { font-style:italic; }
+  body { font-family: Arial, Helvetica, sans-serif; padding: 1rem; color: #111; background: #f7f7f7; }
+  h1 { margin-top: 0; }
+  #loading { font-style: italic; margin-bottom: .5rem; }
+  ul { list-style: none; padding: 0; margin: 0 0 1rem 0; }
+  li { background: #fff; border-radius: 8px; padding: .6rem; margin-bottom: .6rem; display:flex; align-items:center; justify-content:space-between; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .meta { flex: 1 1 auto; }
+  .actions { margin-left: 1rem; flex: 0 0 auto; }
+  button { padding: .35rem .6rem; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+  button[disabled] { opacity: .6; cursor: not-allowed; }
+  .small { font-size: .9rem; color: #666; margin-top: .25rem; }
+  #result { background:#fff; padding:1rem; border-radius:8px; box-shadow: 0 1px 4px rgba(0,0,0,.06); display:none; margin-top:1rem;}
+  #result h2{margin:0 0 .5rem 0;}
+  .error { color: #a00; }
+  /* overlay while computing */
+  #overlay {
+    position: fixed; inset: 0; display: none; align-items:center; justify-content:center;
+    background: rgba(0,0,0,0.4); z-index: 9999;
+  }
+  #overlay .card { background:#fff; padding:1.2rem 1.6rem; border-radius:8px; box-shadow:0 6px 30px rgba(0,0,0,.3); text-align:center; }
+  .spinner { width:28px; height:28px; border-radius:50%; border:4px solid #ddd; border-top-color:#007bff; animation:spin 1s linear infinite; display:inline-block; vertical-align:middle; margin-right:.6rem;}
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
-<h1>Your Recent Bike Rides</h1>
-<div id="loading">Loading activities...</div>
-<ul id="ride-list"></ul>
+  <h1>Your Recent Bike Rides</h1>
+  <div id="loading">Loading activities...</div>
+  <div id="no-session" style="display:none;color:#a00">Session ID missing in URL.</div>
+
+  <ul id="ride-list" aria-live="polite"></ul>
+
+  <div id="result" role="region" aria-live="polite">
+    <h2>Computation result</h2>
+    <div id="result-body"></div>
+    <div class="small" id="result-details"></div>
+    <div style="margin-top:.5rem">
+      <button id="close-result">Close</button>
+    </div>
+  </div>
+
+  <div id="overlay" role="status" aria-hidden="true">
+    <div class="card">
+      <div style="font-size:1rem; margin-bottom:.5rem">
+        <span class="spinner" aria-hidden="true"></span>
+        <strong id="overlay-text">Processing ride — please wait</strong>
+      </div>
+      <div class="small">This can take a few seconds depending on activity length.</div>
+    </div>
+  </div>
 
 <script>
 const params = new URLSearchParams(window.location.search);
 const sessionId = params.get("session_id");
-const list = document.getElementById("ride-list");
-const loadingDiv = document.getElementById("loading");
 const BACKEND_URL = "https://optcadbackend-production.up.railway.app";
 
-if (!sessionId) document.body.innerHTML = "<p>Session ID missing in URL.</p>";
-else {
+const loadingDiv = document.getElementById("loading");
+const noSession = document.getElementById("no-session");
+const list = document.getElementById("ride-list");
+const overlay = document.getElementById("overlay");
+const overlayText = document.getElementById("overlay-text");
+const result = document.getElementById("result");
+const resultBody = document.getElementById("result-body");
+const resultDetails = document.getElementById("result-details");
+const closeResultBtn = document.getElementById("close-result");
+
+let computing = false;
+
+if (!sessionId) {
+  loadingDiv.style.display = "none";
+  noSession.style.display = "block";
+} else {
+  fetchActivities();
+  closeResultBtn.addEventListener('click', () => {
+    result.style.display = 'none';
+  });
+}
+
+function setAllComputeButtonsDisabled(disabled) {
+  const buttons = document.querySelectorAll('button[data-action="compute"]');
+  buttons.forEach(b => b.disabled = disabled);
+}
+
+function showOverlay(text = "Processing ride — please wait") {
+  overlayText.textContent = text;
+  overlay.style.display = "flex";
+  overlay.setAttribute("aria-hidden", "false");
+}
+
+function hideOverlay() {
+  overlay.style.display = "none";
+  overlay.setAttribute("aria-hidden", "true");
+}
+
+function fetchActivities() {
+  loadingDiv.style.display = "block";
   fetch(`${BACKEND_URL}/activities?session_id=${sessionId}`)
-    .then(res => res.json())
+    .then(res => {
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      return res.json();
+    })
     .then(data => {
       loadingDiv.style.display = "none";
-      if (!Array.isArray(data)) return list.innerHTML="<li>No rides found</li>";
-      data.forEach(ride=>{
-        const li=document.createElement("li");
-        const name=ride.name||"Unnamed Ride";
-        const km=(ride.distance/1000).toFixed(2);
-        const date=ride.start_date?new Date(ride.start_date).toLocaleDateString():"Unknown Date";
-        const button=document.createElement("button");
-        button.textContent="Compute";
-        button.onclick=()=>computeRide(ride.id, button);
-        li.textContent=`${name} — ${km} km on ${date} `;
-        li.appendChild(button);
+      list.innerHTML = "";
+      if (!Array.isArray(data) || data.length === 0) {
+        list.innerHTML = "<li>No rides found.</li>";
+        return;
+      }
+      data.forEach(ride => {
+        const li = document.createElement("li");
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const title = document.createElement("div");
+        title.textContent = ride.name || "Unnamed Ride";
+        const sub = document.createElement("div");
+        sub.className = "small";
+        const km = ride.distance ? (ride.distance / 1000).toFixed(2) : "N/A";
+        const date = ride.start_date ? new Date(ride.start_date).toLocaleDateString() : "Unknown Date";
+        sub.textContent = `${km} km • ${date}`;
+        meta.appendChild(title);
+        meta.appendChild(sub);
+
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        const btn = document.createElement("button");
+        btn.textContent = "Compute";
+        btn.setAttribute("data-action", "compute");
+        btn.onclick = () => computeRide(ride.id, btn);
+        actions.appendChild(btn);
+
+        li.appendChild(meta);
+        li.appendChild(actions);
         list.appendChild(li);
       });
+    })
+    .catch(err => {
+      loadingDiv.style.display = "none";
+      list.innerHTML = `<li class="error">Failed loading activities: ${err.message}</li>`;
+      console.error("fetchActivities error:", err);
     });
 }
 
-function computeRide(activityId, button){
-  button.disabled=true;
-  button.textContent="Processing...";
+function computeRide(activityId, clickedButton) {
+  if (computing) return;
+  computing = true;
+
+  // disable UI
+  setAllComputeButtonsDisabled(true);
+  showOverlay("Processing ride — please wait");
+
+  overlayText.textContent = "Fetching activity streams...";
   fetch(`${BACKEND_URL}/compute?session_id=${sessionId}&activity_id=${activityId}`)
-    .then(res=>res.json())
-    .then(data=>{
-      console.log("Computed ride:", data);
-      alert(`Optimal cadence: ${data.optimal_cadence.toFixed(1)}\nSegments: ${data.segments.length}`);
+    .then(res => {
+      if (!res.ok) return res.json().then(j => { throw new Error(j.detail || JSON.stringify(j)); });
+      return res.json();
     })
-    .finally(()=>{
-      button.disabled=false;
-      button.textContent="Compute";
+    .then(data => {
+      // Data expected: { segments: [...], optimal_cadence: {...} , message: "..." }
+      console.log("Compute result:", data);
+
+      // Build result UI
+      resultBody.innerHTML = "";
+      resultDetails.innerHTML = "";
+
+      if (data.message) {
+        const msg = document.createElement("div");
+        msg.className = "small";
+        msg.textContent = data.message;
+        resultBody.appendChild(msg);
+      }
+
+      const segCount = Array.isArray(data.segments) ? data.segments.length : 0;
+      const p = document.createElement("p");
+      p.innerHTML = `<strong>Segments:</strong> ${segCount}`;
+      resultBody.appendChild(p);
+
+      const opt = data.optimal_cadence;
+      if (opt && typeof opt === 'object' && opt.optimal_cadence !== null) {
+        const oc = document.createElement("p");
+        oc.innerHTML = `<strong>Optimal cadence:</strong> ${opt.optimal_cadence}`;
+        resultBody.appendChild(oc);
+
+        if (opt.performance_score !== undefined && opt.performance_score !== null) {
+          const perf = document.createElement("div");
+          perf.className = "small";
+          perf.textContent = `Performance score: ${opt.performance_score}`;
+          resultBody.appendChild(perf);
+        }
+      } else {
+        const no = document.createElement("div");
+        no.className = "error";
+        no.textContent = data.message || "No optimal cadence could be determined for this activity.";
+        resultBody.appendChild(no);
+      }
+
+      // optional: details list (if present)
+      if (opt && Array.isArray(opt.details) && opt.details.length) {
+        const dl = document.createElement("details");
+        dl.style.marginTop = ".6rem";
+        const summary = document.createElement("summary");
+        summary.textContent = "Cadence bins (details)";
+        dl.appendChild(summary);
+
+        const table = document.createElement("table");
+        table.style.width = "100%";
+        table.style.borderCollapse = "collapse";
+        table.style.marginTop = ".4rem";
+
+        opt.details.forEach(row => {
+          const tr = document.createElement("tr");
+          const td1 = document.createElement("td");
+          td1.textContent = `Bin: ${row.cadence_bin}`;
+          const td2 = document.createElement("td");
+          td2.textContent = `Perf: ${row.Performance_Score ? row.Performance_Score.toFixed(3) : "N/A"}`;
+          td1.style.padding = ".2rem .4rem";
+          td2.style.padding = ".2rem .4rem";
+          tr.appendChild(td1);
+          tr.appendChild(td2);
+          table.appendChild(tr);
+        });
+        dl.appendChild(table);
+        resultDetails.appendChild(dl);
+      }
+
+      result.style.display = "block";
+      result.scrollIntoView({ behavior: "smooth" });
+    })
+    .catch(err => {
+      console.error("computeRide error:", err);
+      resultBody.innerHTML = `<div class="error">Computation failed: ${err.message}</div>`;
+      result.style.display = "block";
+    })
+    .finally(() => {
+      computing = false;
+      setAllComputeButtonsDisabled(false);
+      hideOverlay();
     });
 }
 </script>
 </body>
 </html>
-
