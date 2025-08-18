@@ -5,6 +5,7 @@
 <title>Your Strava Rides — OptCad</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
+  /* (same CSS as before) */
   body { font-family: Arial, Helvetica, sans-serif; padding: 1rem; color: #111; background: #f7f7f7; }
   h1 { margin-top: 0; }
   #loading { font-style: italic; margin-bottom: .5rem; }
@@ -18,7 +19,6 @@
   #result { background:#fff; padding:1rem; border-radius:8px; box-shadow: 0 1px 4px rgba(0,0,0,.06); display:none; margin-top:1rem;}
   #result h2{margin:0 0 .5rem 0;}
   .error { color: #a00; }
-  /* overlay while computing */
   #overlay {
     position: fixed; inset: 0; display: none; align-items:center; justify-content:center;
     background: rgba(0,0,0,0.4); z-index: 9999;
@@ -26,8 +26,6 @@
   #overlay .card { background:#fff; padding:1.2rem 1.6rem; border-radius:8px; box-shadow:0 6px 30px rgba(0,0,0,.3); text-align:center; }
   .spinner { width:28px; height:28px; border-radius:50%; border:4px solid #ddd; border-top-color:#007bff; animation:spin 1s linear infinite; display:inline-block; vertical-align:middle; margin-right:.6rem;}
   @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* search bar */
   #search-bar { display:flex; gap:.5rem; margin: .6rem 0 1rem 0; align-items:center; }
   #search-name { flex:1 1 auto; padding:.45rem .6rem; border-radius:6px; border:1px solid #ccc; background:#fff; }
   #search-btn, #refresh-btn { padding:.4rem .7rem; border-radius:6px; }
@@ -38,7 +36,6 @@
   <div id="loading">Loading activities...</div>
   <div id="no-session" style="display:none;color:#a00">Session ID missing in URL.</div>
 
-  <!-- Search bar -->
   <div id="search-bar" aria-hidden="false">
     <input id="search-name" placeholder="Exact activity name (optional)" aria-label="Activity name" />
     <button id="search-btn">Search</button>
@@ -51,9 +48,7 @@
     <h2>Computation result</h2>
     <div id="result-body"></div>
     <div class="small" id="result-details"></div>
-    <div style="margin-top:.5rem">
-      <button id="close-result">Close</button>
-    </div>
+    <div style="margin-top:.5rem"><button id="close-result">Close</button></div>
   </div>
 
   <div id="overlay" role="status" aria-hidden="true">
@@ -80,7 +75,6 @@ const result = document.getElementById("result");
 const resultBody = document.getElementById("result-body");
 const resultDetails = document.getElementById("result-details");
 const closeResultBtn = document.getElementById("close-result");
-
 const searchInput = document.getElementById("search-name");
 const searchBtn = document.getElementById("search-btn");
 const refreshBtn = document.getElementById("refresh-btn");
@@ -90,21 +84,17 @@ let computing = false;
 if (!sessionId) {
   loadingDiv.style.display = "none";
   noSession.style.display = "block";
-  // disable search bar if no session
   document.getElementById("search-bar").style.display = "none";
 } else {
   fetchActivities();
-  closeResultBtn.addEventListener('click', () => {
-    result.style.display = 'none';
-  });
+  closeResultBtn.addEventListener('click', () => { result.style.display = 'none'; });
   searchBtn.addEventListener('click', () => fetchActivities(searchInput.value.trim() || null));
   refreshBtn.addEventListener('click', () => { searchInput.value = ""; fetchActivities(); });
-  // Enter to search
   searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); fetchActivities(searchInput.value.trim() || null); } });
 }
 
-function setAllComputeButtonsDisabled(disabled) {
-  const buttons = document.querySelectorAll('button[data-action="compute"]');
+function setAllActionButtonsDisabled(disabled) {
+  const buttons = document.querySelectorAll('button[data-action]');
   buttons.forEach(b => b.disabled = disabled);
 }
 
@@ -156,11 +146,19 @@ function fetchActivities(activityName = null) {
 
         const actions = document.createElement("div");
         actions.className = "actions";
-        const btn = document.createElement("button");
-        btn.textContent = "Compute";
-        btn.setAttribute("data-action", "compute");
-        btn.onclick = () => computeRide(ride.id, btn);
-        actions.appendChild(btn);
+
+        const computeBtn = document.createElement("button");
+        computeBtn.textContent = "Compute";
+        computeBtn.setAttribute("data-action", "compute");
+        computeBtn.onclick = () => computeRide(ride.id, computeBtn);
+        actions.appendChild(computeBtn);
+
+        const downloadBtn = document.createElement("button");
+        downloadBtn.textContent = "Download CSV";
+        downloadBtn.setAttribute("data-action", "download");
+        downloadBtn.style.marginLeft = "0.5rem";
+        downloadBtn.onclick = () => downloadCSV(ride.id, downloadBtn);
+        actions.appendChild(downloadBtn);
 
         li.appendChild(meta);
         li.appendChild(actions);
@@ -177,9 +175,8 @@ function fetchActivities(activityName = null) {
 function computeRide(activityId, clickedButton) {
   if (computing) return;
   computing = true;
-
-  // disable UI
-  setAllComputeButtonsDisabled(true);
+  setAllActionButtonsDisabled(true);
+  clickedButton.disabled = true;
   showOverlay("Processing ride — please wait");
 
   overlayText.textContent = "Fetching activity streams...";
@@ -189,10 +186,7 @@ function computeRide(activityId, clickedButton) {
       return res.json();
     })
     .then(data => {
-      // Data expected: { segments: [...], optimal_cadence: {...} , message: "..." }
       console.log("Compute result:", data);
-
-      // Build result UI
       resultBody.innerHTML = "";
       resultDetails.innerHTML = "";
 
@@ -213,7 +207,6 @@ function computeRide(activityId, clickedButton) {
         const oc = document.createElement("p");
         oc.innerHTML = `<strong>Optimal cadence:</strong> ${opt.optimal_cadence}`;
         resultBody.appendChild(oc);
-
         if (opt.performance_score !== undefined && opt.performance_score !== null) {
           const perf = document.createElement("div");
           perf.className = "small";
@@ -227,7 +220,6 @@ function computeRide(activityId, clickedButton) {
         resultBody.appendChild(no);
       }
 
-      // optional: details list (if present)
       if (opt && Array.isArray(opt.details) && opt.details.length) {
         const dl = document.createElement("details");
         dl.style.marginTop = ".6rem";
@@ -266,7 +258,41 @@ function computeRide(activityId, clickedButton) {
     })
     .finally(() => {
       computing = false;
-      setAllComputeButtonsDisabled(false);
+      setAllActionButtonsDisabled(false);
+      hideOverlay();
+    });
+}
+
+function downloadCSV(activityId, btn) {
+  if (computing) return;
+  computing = true;
+  setAllActionButtonsDisabled(true);
+  btn.disabled = true;
+  showOverlay("Downloading CSV...");
+
+  fetch(`${BACKEND_URL}/activity-stream?session_id=${sessionId}&activity_id=${activityId}`)
+    .then(res => {
+      if (!res.ok) return res.text().then(t => { throw new Error(t || `HTTP ${res.status}`); });
+      return res.blob();
+    })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `activity_${activityId}_streams.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    })
+    .catch(err => {
+      console.error("downloadCSV error:", err);
+      alert("CSV download failed: " + (err.message || err));
+    })
+    .finally(() => {
+      computing = false;
+      setAllActionButtonsDisabled(false);
+      btn.disabled = false;
       hideOverlay();
     });
 }
